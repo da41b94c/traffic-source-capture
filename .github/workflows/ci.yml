@@ -51,6 +51,9 @@ jobs:
       - name: PHP syntax check
         run: php -l src/TrafficSourceCapture.php
 
+      - name: Run tests
+        run: php tests/Run.php
+        
       - name: Smoke test
         run: |
           php -r '

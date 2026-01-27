@@ -388,15 +388,13 @@ final class TrafficSourceCapture
 	private static function GetSafeLanding(array $server)
 	{
 		$uri = isset($server['REQUEST_URI']) ? (string)$server['REQUEST_URI'] : '';
-		$uri = self::CleanText($uri, 300);
-
-		// Убираем query целиком: UTM сохраняем отдельно
+		
 		$pos = strpos($uri, '?');
 		if ($pos !== false) {
 			$uri = substr($uri, 0, $pos);
 		}
 
-		return $uri;
+		return self::CleanPath($uri, 300);
 	}
 
 	private static function ExtractUtm(array $get)
@@ -553,6 +551,24 @@ final class TrafficSourceCapture
 
 		// Разрешаем: буквы/цифры/пробел/._-/%/+/=
 		$value = preg_replace('/[^\p{L}\p{N}\s\-\._%+=]/u', '', $value);
+
+		return $value === null ? '' : $value;
+	}
+	
+	private static function CleanPath($value, $maxLen)
+	{
+		$value = trim((string)$value);
+
+		if (function_exists('mb_substr')) {
+			$value = mb_substr($value, 0, (int)$maxLen, 'UTF-8');
+		} else {
+			$value = substr($value, 0, (int)$maxLen);
+		}
+
+		$value = preg_replace('/\p{Cc}+/u', '', $value);
+
+		// Разрешаем: буквы/цифры/слэши/._-/%/+/=
+		$value = preg_replace('/[^\p{L}\p{N}\/\-\._%+=]/u', '', $value);
 
 		return $value === null ? '' : $value;
 	}
