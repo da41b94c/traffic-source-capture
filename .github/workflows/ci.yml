@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    name: PHP ${{ matrix.php }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - php: '7.0'
+            os: ubuntu-22.04
+          - php: '7.4'
+            os: ubuntu-latest
+          - php: '8.0'
+            os: ubuntu-latest
+          - php: '8.2'
+            os: ubuntu-latest
+          - php: '8.3'
+            os: ubuntu-latest
+          - php: '8.4'
+            os: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          tools: composer:v2
+          coverage: none
+
+      - name: Show versions
+        run: |
+          php -v
+          composer -V
+
+      - name: Composer validate
+        run: composer validate --strict
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: PHP syntax check
+        run: php -l src/TrafficSourceCapture.php
+
+      - name: Smoke test
+        run: |
+          php -r '
+          require "vendor/autoload.php";
+          use Da41b94c\TrafficSource\TrafficSourceCapture;
+
+          // имитируем вход с Google (organic)
+          TrafficSourceCapture::Capture([
+            "HTTP_HOST" => "example.com",
+            "REQUEST_URI" => "/landing?x=1",
+            "HTTP_REFERER" => "https://www.google.com/search?q=test"
+          ], [], false, 0);
+
+          echo TrafficSourceCapture::GetHuman(), PHP_EOL;
+          '

@@ -1,0 +1,32 @@
+{
+	"name": "da41b94c/traffic-source-capture",
+	"description": "First-touch traffic source capture (UTM/referrer/search/AI chat) without external services",
+	"type": "library",
+	"license": "MIT",
+	"keywords": [
+		"utm",
+		"referrer",
+		"traffic",
+		"attribution",
+		"first-touch",
+		"lead",
+		"php"
+	],
+	"require": {
+		"php": ">=7.0"
+	},
+	"suggest": {
+		"ext-intl": "For idn_to_ascii() to normalize IDN domains"
+	},
+	"autoload": {
+		"psr-4": {
+			"Da41b94c\\TrafficSource\\": "src/"
+		}
+	},
+	"support": {
+		"issues": "https://github.com/da41b94c/traffic-source-capture/issues",
+		"source": "https://github.com/da41b94c/traffic-source-capture"
+	},
+	"minimum-stability": "stable",
+	"prefer-stable": true
+}
