@@ -16,7 +16,7 @@ final class TestRunner
 	private $Passed = 0;
 	private $Failed = 0;
 
-	public function Run(string $Name, callable $Fn): void
+	public function Run(string $Name, callable $Fn)
 	{
 		try {
 			$this->ResetState();
@@ -39,12 +39,12 @@ final class TestRunner
 		return $this->Failed === 0 ? 0 : 1;
 	}
 
-	private function Out(string $Line): void
+	private function Out(string $Line)
 	{
 		fwrite(STDOUT, $Line.PHP_EOL);
 	}
 
-	private function ResetState(): void
+	private function ResetState()
 	{
 		if (session_status() !== PHP_SESSION_ACTIVE) {
 			@session_start();
@@ -60,14 +60,14 @@ final class TestRunner
 	}
 }
 
-function AssertTrue($Cond, string $Msg = 'Assertion failed'): void
+function AssertTrue($Cond, string $Msg = 'Assertion failed')
 {
 	if (!$Cond) {
 		throw new \RuntimeException($Msg);
 	}
 }
 
-function AssertSame($Expected, $Actual, string $Msg = ''): void
+function AssertSame($Expected, $Actual, string $Msg = '')
 {
 	if ($Expected !== $Actual) {
 		$e = var_export($Expected, true);
@@ -76,7 +76,7 @@ function AssertSame($Expected, $Actual, string $Msg = ''): void
 	}
 }
 
-function AssertContains(string $Needle, string $Haystack, string $Msg = ''): void
+function AssertContains(string $Needle, string $Haystack, string $Msg = '')
 {
 	if (strpos($Haystack, $Needle) === false) {
 		throw new \RuntimeException(($Msg ? $Msg.' — ' : '')."Did not find '{$Needle}' in '{$Haystack}'");
