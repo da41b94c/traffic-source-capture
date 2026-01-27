@@ -1,3 +1,6 @@
+[![Packagist Version](https://img.shields.io/packagist/v/da41b94c/traffic-source-capture.svg)](https://packagist.org/packages/da41b94c/traffic-source-capture)
+[![CI](https://github.com/da41b94c/traffic-source-capture/actions/workflows/ci.yml/badge.svg)](https://github.com/da41b94c/traffic-source-capture/actions/workflows/ci.yml)
+
 # TrafficSourceCapture
 
 First-touch фиксация источника трафика (UTM / referrer / поисковики / AI-чаты) **без сторонних инструментов**.
