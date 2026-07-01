@@ -67,6 +67,13 @@ function AssertTrue($Cond, string $Msg = 'Assertion failed')
 	}
 }
 
+function AssertFalse($Cond, string $Msg = 'Assertion failed')
+{
+	if ($Cond) {
+		throw new \RuntimeException($Msg);
+	}
+}
+
 function AssertSame($Expected, $Actual, string $Msg = '')
 {
 	if ($Expected !== $Actual) {
@@ -112,6 +119,7 @@ $T->Run('AI via strict UTM (chatgpt + ai_chat)', function () {
 
 	$data = TrafficSourceCapture::GetData();
 	AssertSame('/landing', $data['Landing'], 'Landing should not contain query string');
+	AssertSame('high', $data['Confidence']);
 });
 
 $T->Run('Paid via UTM (non-AI)', function () {
@@ -126,6 +134,11 @@ $T->Run('Paid via UTM (non-AI)', function () {
 
 	AssertSame('paid', GetChannel());
 	AssertContains('Реклама', TrafficSourceCapture::GetHuman());
+
+	$lead = TrafficSourceCapture::GetLeadData();
+	AssertSame('cpc', $lead['traffic_medium']);
+	AssertSame('123', $lead['traffic_campaign']);
+	AssertSame('high', $lead['traffic_confidence']);
 });
 
 $T->Run('Paid via click-id only (gclid)', function () {
@@ -138,6 +151,70 @@ $T->Run('Paid via click-id only (gclid)', function () {
 
 	AssertSame('paid', GetChannel());
 	AssertContains('gclid=test123', TrafficSourceCapture::GetHuman());
+
+	$lead = TrafficSourceCapture::GetLeadData();
+	AssertSame('gclid', $lead['traffic_source']);
+	AssertSame('{"gclid":"test123"}', $lead['traffic_click_ids']);
+	AssertSame('medium', $lead['traffic_confidence']);
+});
+
+$T->Run('Paid via click-id only (ysclid)', function () {
+	TrafficSourceCapture::Capture([
+		'HTTP_HOST' => 'example.com',
+		'REQUEST_URI' => '/p',
+	], [
+		'ysclid' => 'ya-click-123'
+	], false, 0);
+
+	AssertSame('paid', GetChannel());
+
+	$lead = TrafficSourceCapture::GetLeadData();
+	AssertSame('ysclid', $lead['traffic_source']);
+	AssertSame('{"ysclid":"ya-click-123"}', $lead['traffic_click_ids']);
+});
+
+$T->Run('Paid via Google Ads gbraid and wbraid', function () {
+	TrafficSourceCapture::Capture([
+		'HTTP_HOST' => 'example.com',
+		'REQUEST_URI' => '/p',
+	], [
+		'gbraid' => 'gb-123',
+		'wbraid' => 'wb-456'
+	], false, 0);
+
+	AssertSame('paid', GetChannel());
+
+	$lead = TrafficSourceCapture::GetLeadData();
+	AssertSame('{"gbraid":"gb-123","wbraid":"wb-456"}', $lead['traffic_click_ids']);
+});
+
+$T->Run('Paid via Microsoft Ads msclkid', function () {
+	TrafficSourceCapture::Capture([
+		'HTTP_HOST' => 'example.com',
+		'REQUEST_URI' => '/p',
+	], [
+		'msclkid' => 'ms-123'
+	], false, 0);
+
+	AssertSame('paid', GetChannel());
+	AssertContains('msclkid=ms-123', TrafficSourceCapture::GetHuman());
+});
+
+$T->Run('Extended UTM fields are preserved', function () {
+	TrafficSourceCapture::Capture([
+		'HTTP_HOST' => 'example.com',
+		'REQUEST_URI' => '/p',
+	], [
+		'utm_source' => 'yandex',
+		'utm_medium' => 'cpc',
+		'utm_campaign' => 'roofmaster',
+		'utm_id' => 'campaign-id-1',
+		'utm_source_platform' => 'search'
+	], false, 0);
+
+	$data = TrafficSourceCapture::GetData();
+	AssertSame('campaign-id-1', $data['Utm']['utm_id']);
+	AssertSame('search', $data['Utm']['utm_source_platform']);
 });
 
 $T->Run('Direct when no referrer and no UTM', function () {
@@ -148,6 +225,9 @@ $T->Run('Direct when no referrer and no UTM', function () {
 
 	AssertSame('direct', GetChannel());
 	AssertContains('Прямой', TrafficSourceCapture::GetHuman());
+
+	$lead = TrafficSourceCapture::GetLeadData();
+	AssertSame('low', $lead['traffic_confidence']);
 });
 
 $T->Run('Direct when referrer is internal', function () {
@@ -193,6 +273,16 @@ $T->Run('Organic from Yandex with Cyrillic query extraction', function () {
 	AssertSame('привет', $data['Search']['Query']);
 });
 
+$T->Run('Similar-looking search domain is not organic', function () {
+	TrafficSourceCapture::Capture([
+		'HTTP_HOST' => 'example.com',
+		'REQUEST_URI' => '/p',
+		'HTTP_REFERER' => 'https://notyandex.ru/search/?text=test'
+	], [], false, 0);
+
+	AssertSame('referral', GetChannel());
+});
+
 $T->Run('Referral from external site', function () {
 	TrafficSourceCapture::Capture([
 		'HTTP_HOST' => 'example.com',
@@ -215,6 +305,10 @@ $T->Run('AI fallback via referrer host (chat.openai.com)', function () {
 
 	AssertSame('ai', GetChannel());
 	AssertContains('ИИ-чат', TrafficSourceCapture::GetHuman());
+
+	$lead = TrafficSourceCapture::GetLeadData();
+	AssertSame('chat.openai.com', $lead['traffic_source']);
+	AssertSame('medium', $lead['traffic_confidence']);
 });
 
 $T->Run('Sanitization removes dangerous characters from UTM', function () {
@@ -275,6 +369,35 @@ $T->Run('Cookie restore: session empty but cookie contains data', function () {
 	AssertSame('referral', GetChannel());
 	$data = TrafficSourceCapture::GetData();
 	AssertSame('example.net', $data['SourceHost']);
+	AssertSame(2, $data['SchemaVersion']);
+});
+
+$T->Run('Cookie restore sanitizes payload and drops unknown fields', function () {
+	$payload = [
+		'Channel' => 'paid',
+		'FirstSeen' => time() - 5,
+		'Landing' => '/x<script>',
+		'Utm' => [
+			'utm_source' => 'yandex<script>',
+			'utm_medium' => 'cpc',
+			'unknown' => 'must-not-survive'
+		],
+		'Hack' => 'must-not-survive',
+		'Confidence' => 'evil'
+	];
+
+	$_COOKIE[TrafficSourceCapture::CookieKey] = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+	TrafficSourceCapture::Capture([
+		'HTTP_HOST' => 'example.com',
+		'REQUEST_URI' => '/p'
+	], [], true, 0);
+
+	$data = TrafficSourceCapture::GetData();
+	AssertSame('paid', $data['Channel']);
+	AssertFalse(isset($data['Hack']), 'Unknown top-level cookie field should be dropped');
+	AssertFalse(isset($data['Utm']['unknown']), 'Unknown UTM cookie field should be dropped');
+	AssertSame('medium', $data['Confidence']);
 });
 
 exit($T->Summary());
