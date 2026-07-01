@@ -7,10 +7,17 @@ final class TrafficSourceCapture
 	const SessionKey = 'TrafficSourceCapture';
 	const CookieKey = 'TrafficSourceCapture';
 	const CookieTtl = 2592000; // 30 days
+	const SchemaVersion = 2;
 
 	private static $UtmKeys = [
 		'utm_source','utm_medium','utm_campaign','utm_content','utm_term',
-		'yclid','gclid','fbclid'
+		'utm_id','utm_source_platform','utm_creative_format','utm_marketing_tactic',
+		'yclid','gclid','fbclid','ysclid','gbraid','wbraid','msclkid','ttclid','vkclid',
+		'roistat','_openstat','from'
+	];
+
+	private static $ClickIdKeys = [
+		'yclid','gclid','fbclid','ysclid','gbraid','wbraid','msclkid','ttclid','vkclid','roistat','_openstat'
 	];
 
 	// AI: whitelist источников + whitelist medium (анти-подмена)
@@ -91,7 +98,7 @@ final class TrafficSourceCapture
 		$currentHost = self::GetCurrentHost($server);
 		$landing = self::GetSafeLanding($server);
 
-		// 1) UTM (достаём один раз)
+		// 1) UTM / click-id (достаём один раз)
 		$utm = self::ExtractUtm($get);
 
 		// 1.1) AI chats: строго по UTM
@@ -102,6 +109,7 @@ final class TrafficSourceCapture
 				'Landing' => $landing,
 				'Utm' => $utm,
 				'SourceHost' => $currentHost,
+				'Confidence' => 'high',
 			], $useCookieBackup);
 			return;
 		}
@@ -114,6 +122,7 @@ final class TrafficSourceCapture
 				'Landing' => $landing,
 				'Utm' => $utm,
 				'SourceHost' => $currentHost,
+				'Confidence' => self::GetPaidConfidence($utm),
 			], $useCookieBackup);
 			return;
 		}
@@ -126,6 +135,7 @@ final class TrafficSourceCapture
 				'FirstSeen' => $now,
 				'Landing' => $landing,
 				'SourceHost' => $currentHost,
+				'Confidence' => 'low',
 			], $useCookieBackup);
 			return;
 		}
@@ -140,6 +150,7 @@ final class TrafficSourceCapture
 				'Landing' => $landing,
 				'Referrer' => $ref,
 				'SourceHost' => $currentHost,
+				'Confidence' => 'low',
 			], $useCookieBackup);
 			return;
 		}
@@ -152,6 +163,7 @@ final class TrafficSourceCapture
 				'Landing' => $landing,
 				'Referrer' => $ref,
 				'SourceHost' => $refHost,
+				'Confidence' => 'medium',
 			], $useCookieBackup);
 			return;
 		}
@@ -166,6 +178,7 @@ final class TrafficSourceCapture
 				'Referrer' => $ref,
 				'SourceHost' => $refHost,
 				'Search' => $search,
+				'Confidence' => 'medium',
 			], $useCookieBackup);
 			return;
 		}
@@ -177,6 +190,7 @@ final class TrafficSourceCapture
 			'Landing' => $landing,
 			'Referrer' => $ref,
 			'SourceHost' => $refHost,
+			'Confidence' => 'medium',
 		], $useCookieBackup);
 	}
 
@@ -252,19 +266,35 @@ final class TrafficSourceCapture
 			return [
 				'traffic_channel' => '',
 				'traffic_source' => '',
+				'traffic_medium' => '',
+				'traffic_campaign' => '',
+				'traffic_content' => '',
+				'traffic_term' => '',
+				'traffic_landing' => '',
+				'traffic_referrer_host' => '',
+				'traffic_confidence' => '',
+				'traffic_click_ids' => '',
 				'traffic_details' => '',
 				'traffic_raw' => '',
 			];
 		}
 
 		$channel = isset($data['Channel']) ? (string)$data['Channel'] : '';
+		$utm = (isset($data['Utm']) && is_array($data['Utm'])) ? $data['Utm'] : [];
+		$search = (isset($data['Search']) && is_array($data['Search'])) ? $data['Search'] : [];
+		$clickIds = self::ExtractClickIds($utm);
 		$source = '';
 
 		if ($channel === 'ai' || $channel === 'paid') {
-			$utm = (isset($data['Utm']) && is_array($data['Utm'])) ? $data['Utm'] : [];
 			$source = isset($utm['utm_source']) ? (string)$utm['utm_source'] : '';
+			if ($source === '' && !empty($clickIds)) {
+				$keys = array_keys($clickIds);
+				$source = isset($keys[0]) ? (string)$keys[0] : '';
+			}
+			if ($source === '' && $channel === 'ai' && !empty($data['SourceHost'])) {
+				$source = (string)$data['SourceHost'];
+			}
 		} elseif ($channel === 'organic') {
-			$search = (isset($data['Search']) && is_array($data['Search'])) ? $data['Search'] : [];
 			$source = isset($search['Engine']) ? (string)$search['Engine'] : '';
 		} elseif ($channel === 'referral') {
 			$source = isset($data['SourceHost']) ? (string)$data['SourceHost'] : '';
@@ -275,6 +305,14 @@ final class TrafficSourceCapture
 		return [
 			'traffic_channel' => $channel,
 			'traffic_source' => $source,
+			'traffic_medium' => isset($utm['utm_medium']) ? (string)$utm['utm_medium'] : '',
+			'traffic_campaign' => isset($utm['utm_campaign']) ? (string)$utm['utm_campaign'] : '',
+			'traffic_content' => isset($utm['utm_content']) ? (string)$utm['utm_content'] : '',
+			'traffic_term' => isset($utm['utm_term']) ? (string)$utm['utm_term'] : '',
+			'traffic_landing' => isset($data['Landing']) ? (string)$data['Landing'] : '',
+			'traffic_referrer_host' => isset($data['SourceHost']) ? (string)$data['SourceHost'] : '',
+			'traffic_confidence' => isset($data['Confidence']) ? (string)$data['Confidence'] : '',
+			'traffic_click_ids' => self::ToJson($clickIds),
 			'traffic_details' => self::GetHuman(),
 			'traffic_raw' => self::ToJson($data),
 		];
@@ -297,6 +335,8 @@ final class TrafficSourceCapture
 
 	private static function Save(array $data, $useCookieBackup)
 	{
+		$data['SchemaVersion'] = self::SchemaVersion;
+		$data = self::NormalizeStoredData($data);
 		$_SESSION[self::SessionKey] = $data;
 
 		if ($useCookieBackup) {
@@ -327,13 +367,82 @@ final class TrafficSourceCapture
 			return;
 		}
 
-		$channel = (string)$data['Channel'];
-		$allowed = ['ai','paid','organic','referral','direct'];
-		if (!in_array($channel, $allowed, true)) {
+		$data = self::NormalizeStoredData($data);
+		if (empty($data['Channel'])) {
 			return;
 		}
 
 		$_SESSION[self::SessionKey] = $data;
+	}
+
+	private static function NormalizeStoredData(array $data)
+	{
+		$channel = isset($data['Channel']) ? (string)$data['Channel'] : '';
+		$allowedChannels = ['ai','paid','organic','referral','direct'];
+		if (!in_array($channel, $allowedChannels, true)) {
+			return [];
+		}
+
+		$out = [
+			'SchemaVersion' => self::SchemaVersion,
+			'Channel' => $channel,
+		];
+
+		if (isset($data['FirstSeen'])) {
+			$out['FirstSeen'] = (int)$data['FirstSeen'];
+		}
+
+		if (!empty($data['Landing'])) {
+			$landing = self::CleanPath((string)$data['Landing'], 300);
+			if ($landing !== '') {
+				$out['Landing'] = $landing;
+			}
+		}
+
+		if (!empty($data['Utm']) && is_array($data['Utm'])) {
+			$utm = self::ExtractUtm($data['Utm']);
+			if (!empty($utm)) {
+				$out['Utm'] = $utm;
+			}
+		}
+
+		if (!empty($data['Referrer'])) {
+			$referrer = self::CleanUrl((string)$data['Referrer'], 500);
+			if ($referrer !== '') {
+				$out['Referrer'] = $referrer;
+			}
+		}
+
+		if (!empty($data['SourceHost'])) {
+			$sourceHost = self::NormalizeHost((string)$data['SourceHost']);
+			if ($sourceHost !== '') {
+				$out['SourceHost'] = $sourceHost;
+			}
+		}
+
+		if (!empty($data['Search']) && is_array($data['Search'])) {
+			$search = [];
+			if (!empty($data['Search']['Engine'])) {
+				$search['Engine'] = self::CleanText((string)$data['Search']['Engine'], 50);
+			}
+			if (!empty($data['Search']['Host'])) {
+				$search['Host'] = self::NormalizeHost((string)$data['Search']['Host']);
+			}
+			if (!empty($data['Search']['Query'])) {
+				$search['Query'] = self::CleanText((string)$data['Search']['Query'], 160);
+			}
+			if (!empty($search)) {
+				$out['Search'] = $search;
+			}
+		}
+
+		if (!empty($data['Confidence']) && self::IsAllowedConfidence((string)$data['Confidence'])) {
+			$out['Confidence'] = (string)$data['Confidence'];
+		} else {
+			$out['Confidence'] = self::GuessConfidence($out);
+		}
+
+		return $out;
 	}
 
 	private static function IsExpired($ttlSeconds)
@@ -406,9 +515,27 @@ final class TrafficSourceCapture
 				continue;
 			}
 
-			$v = self::CleanText((string)$get[$k], 150);
+			$v = $get[$k];
+			if (is_array($v)) {
+				$v = reset($v);
+			}
+
+			$v = self::CleanText((string)$v, 150);
 			if ($v !== '') {
 				$out[$k] = $v;
+			}
+		}
+
+		return $out;
+	}
+
+	private static function ExtractClickIds(array $utm)
+	{
+		$out = [];
+
+		foreach (self::$ClickIdKeys as $k) {
+			if (!empty($utm[$k])) {
+				$out[$k] = (string)$utm[$k];
 			}
 		}
 
@@ -437,12 +564,41 @@ final class TrafficSourceCapture
 
 	private static function IsAiByReferrerHost($refHost)
 	{
-		foreach (self::$AiRefHosts as $h) {
-			if ($refHost === $h) {
-				return true;
-			}
+		return self::HostMatches($refHost, self::$AiRefHosts);
+	}
+
+	private static function GetPaidConfidence(array $utm)
+	{
+		if (!empty($utm['utm_source']) && !empty($utm['utm_medium']) && !empty($utm['utm_campaign'])) {
+			return 'high';
 		}
-		return false;
+
+		return 'medium';
+	}
+
+	private static function IsAllowedConfidence($confidence)
+	{
+		return in_array($confidence, ['high','medium','low'], true);
+	}
+
+	private static function GuessConfidence(array $data)
+	{
+		$channel = isset($data['Channel']) ? (string)$data['Channel'] : '';
+		$utm = (isset($data['Utm']) && is_array($data['Utm'])) ? $data['Utm'] : [];
+
+		if ($channel === 'direct') {
+			return 'low';
+		}
+
+		if ($channel === 'paid') {
+			return self::GetPaidConfidence($utm);
+		}
+
+		if ($channel === 'ai' && self::IsAiByUtmStrict($utm)) {
+			return 'high';
+		}
+
+		return 'medium';
 	}
 
 	private static function GetCurrentHost(array $server)
@@ -474,7 +630,7 @@ final class TrafficSourceCapture
 		}
 
 		$host = preg_replace('/[^\p{L}\p{N}\.\-]/u', '', $host);
-		return $host;
+		return $host === null ? '' : $host;
 	}
 
 	private static function DetectSearchEngine($refHost, $refUrl)
@@ -498,8 +654,31 @@ final class TrafficSourceCapture
 
 	private static function HostMatches($host, array $needles)
 	{
+		$host = strtolower((string)$host);
+		if ($host === '') {
+			return false;
+		}
+
 		foreach ($needles as $n) {
-			if (stripos($host, $n) !== false) {
+			$n = strtolower(trim((string)$n));
+			if ($n === '') {
+				continue;
+			}
+
+			// Family pattern: google. matches google.com and news.google.com, but not evilgoogle.com.
+			if (substr($n, -1) === '.') {
+				if (strpos($host, $n) === 0 || strpos($host, '.'.$n) !== false) {
+					return true;
+				}
+				continue;
+			}
+
+			if ($host === $n) {
+				return true;
+			}
+
+			$suffix = '.'.$n;
+			if (strlen($host) > strlen($suffix) && substr($host, -strlen($suffix)) === $suffix) {
 				return true;
 			}
 		}
